@@ -5,6 +5,12 @@ import org.project.carpooling.dto.LoginRequest;
 import org.project.carpooling.dto.RegisterRequest;
 import org.project.carpooling.model.User;
 import org.project.carpooling.repository.UserRepository;
+import org.project.carpooling.security.JwtService;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -15,15 +21,20 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final JwtService jwtService;
 
-    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public AuthService(UserRepository userRepository,
+                       PasswordEncoder passwordEncoder,
+                       AuthenticationManager authenticationManager,
+                       JwtService jwtService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.authenticationManager = authenticationManager;
+        this.jwtService = jwtService;
     }
 
-    // ---------------- Register ----------------
     public AuthResponse register(RegisterRequest request) {
-        // Vérification si email ou username existe déjà
         if (userRepository.existsByUsername(request.getUsername())) {
             throw new RuntimeException("Nom d'utilisateur déjà utilisé");
         }
@@ -31,36 +42,36 @@ public class AuthService {
             throw new RuntimeException("Email déjà utilisé");
         }
 
-        // Création de l'utilisateur
         User user = new User();
         user.setName(request.getName());
         user.setEmail(request.getEmail());
         user.setUsername(request.getUsername());
         user.setPhone(request.getPhone());
-        user.setRating((double) 0); // valeur par défaut
-        user.setRoles("USER"); // rôle par défaut
-        user.setPassword(passwordEncoder.encode(request.getPassword())); // encodage du mot de passe
+        user.setRating(0.0);
+        user.setRoles("ROLE_USER");
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
 
-        // Sauvegarde en base
         userRepository.save(user);
 
         return new AuthResponse("Inscription réussie pour : " + user.getUsername());
     }
 
-    // ---------------- Login ----------------
     public AuthResponse login(LoginRequest request) {
-        // Recherche de l'utilisateur par email
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
+        // Authentification via Spring Security
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        request.getUsernameOrEmail(),
+                        request.getPassword()
+                )
+        );
 
-        // Vérification du mot de passe
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new RuntimeException("Mot de passe incorrect");
-        }
+        SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        // Ici, si tu veux utiliser JWT, c'est à cet endroit que tu le génères
-        return new AuthResponse("Connexion réussie pour : " + user.getUsername());
+        // Génération du token JWT
+        String jwtToken = jwtService.generateToken(authentication.getName());
+
+        return new AuthResponse(jwtToken);
     }
 }
